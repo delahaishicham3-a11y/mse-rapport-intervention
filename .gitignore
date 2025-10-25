@@ -1,0 +1,43 @@
+# Dépendances
+/vendor/
+composer.lock
+
+# Fichiers uploadés
+uploads/*
+!uploads/.gitkeep
+
+# Rapports générés
+reports/*
+!reports/.gitkeep
+
+# Variables d'environnement
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+/logs/
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Temporary files
+/tmp/
+*.tmp
+
+# PDFs générés (optionnel, à décommenter si vous voulez les ignorer)
+# *.pdf
