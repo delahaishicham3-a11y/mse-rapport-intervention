@@ -1,6 +1,6 @@
 <?php
 /**
- * Configuration de la base de données PostgreSQL
+ * Configuration de la base de données PostgreSQL avec support photos
  */
 
 class Database {
@@ -13,7 +13,6 @@ class Database {
         
         if ($dbUrl) {
             // Parse l'URL PostgreSQL fournie par Render
-            // Format: postgres://user:password@host:port/dbname
             $dbParts = parse_url($dbUrl);
             
             $host = $dbParts['host'];
@@ -59,6 +58,7 @@ class Database {
     
     private function initTables() {
         $sql = "
+        -- Table des rapports
         CREATE TABLE IF NOT EXISTS reports (
             id SERIAL PRIMARY KEY,
             report_num VARCHAR(100),
@@ -79,14 +79,31 @@ class Database {
             mesures JSONB,
             controles JSONB,
             releves JSONB,
+            email_destinataire VARCHAR(255),
+            email_sent BOOLEAN DEFAULT FALSE,
+            email_sent_at TIMESTAMP,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        
+        -- Table des photos
+        CREATE TABLE IF NOT EXISTS report_photos (
+            id SERIAL PRIMARY KEY,
+            report_id INTEGER REFERENCES reports(id) ON DELETE CASCADE,
+            photo_data TEXT NOT NULL,
+            photo_name VARCHAR(255),
+            photo_type VARCHAR(50),
+            photo_size INTEGER,
+            description TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         
         CREATE INDEX IF NOT EXISTS idx_report_num ON reports(report_num);
         CREATE INDEX IF NOT EXISTS idx_report_date ON reports(report_date);
         CREATE INDEX IF NOT EXISTS idx_urgence ON reports(urgence);
         CREATE INDEX IF NOT EXISTS idx_created_at ON reports(created_at);
+        CREATE INDEX IF NOT EXISTS idx_email_sent ON reports(email_sent);
+        CREATE INDEX IF NOT EXISTS idx_report_photos_report_id ON report_photos(report_id);
         ";
         
         $this->pdo->exec($sql);
