@@ -5,10 +5,12 @@ require_once __DIR__ . '/../vendor/autoload.php';
 require_once __DIR__ . '/../config/database.php';
 
 use MSE\Report;
+use MSE\EmailService;
 
-// Initialiser le modèle
+// Initialiser les services
 try {
     $reportModel = new Report();
+    $emailService = new EmailService();
 } catch (Exception $e) {
     die("Erreur de connexion à la base de données: " . $e->getMessage());
 }
@@ -22,7 +24,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     
     try {
         if ($action === 'save') {
-            // Sauvegarder un rapport
+            // Récupérer les données du rapport
             $reportData = [
                 'reportNum' => $_POST['reportNum'] ?? '',
                 'reportDate' => $_POST['reportDate'] ?? '',
@@ -39,12 +41,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'recommandations' => $_POST['recommandations'] ?? '',
                 'urgence' => $_POST['urgence'] ?? '',
                 'intervenant' => $_POST['intervenant'] ?? '',
+                'email_destinataire' => $_POST['email_destinataire'] ?? '',
                 'mesures' => json_decode($_POST['mesures'] ?? '{}', true),
                 'controles' => json_decode($_POST['controles'] ?? '{}', true),
                 'releves' => json_decode($_POST['releves'] ?? '{}', true),
             ];
             
-            $id = $reportModel->save($reportData);
+            // Récupérer les photos
+            $photos = [];
+            if (!empty($_POST['photos'])) {
+                $photosData = json_decode($_POST['photos'], true);
+                foreach ($photosData as $photoData) {
+                    $photos[] = [
+                        'data' => $photoData['data'],
+                        'name' => $photoData['name'],
+                        'type' => $photoData['type'],
+                        'size' => $photoData['size'],
+                        'description' => $photoData['description'] ?? ''
+                    ];
+                }
+            }
+            
+            $id = $reportModel->save($reportData, $photos);
             
             $message = 'Rapport sauvegardé avec succès ! (ID: ' . $id . ')';
             $messageType = 'success';
@@ -56,6 +74,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             
             $message = 'Rapport supprimé';
             $messageType = 'success';
+        }
+        
+        if ($action === 'send_email') {
+            $id = intval($_POST['report_id']);
+            $report = $reportModel->getById($id);
+            
+            if ($report) {
+                $photos = $report['photos'] ?? [];
+                $emailService->sendReport($report, $photos);
+                $reportModel->markEmailSent($id);
+                
+                $message = 'Email envoyé avec succès à ' . $report['email_destinataire'];
+                $messageType = 'success';
+            }
         }
         
         if ($action === 'generate_pdf') {
@@ -170,7 +202,6 @@ body {
   color: var(--gray);
   transition: all 0.3s ease;
   font-weight: 500;
-  position: relative;
 }
 
 .nav-btn:hover {
@@ -267,14 +298,214 @@ select.form-control {
   font-size: 20px;
 }
 
-.card.chaudiere-1 {
-  border-left: 4px solid var(--info);
-  background: linear-gradient(to right, rgba(6, 182, 212, 0.05), white);
+/* Photos Section */
+.photos-container {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 15px;
+  margin-top: 15px;
 }
 
-.card.chaudiere-2 {
-  border-left: 4px solid var(--warning);
-  background: linear-gradient(to right, rgba(245, 158, 11, 0.05), white);
+.photo-item {
+  position: relative;
+  border: 2px dashed var(--border);
+  border-radius: 12px;
+  padding: 10px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  background: var(--light-gray);
+}
+
+.photo-item:hover {
+  border-color: var(--primary);
+  background: rgba(59, 130, 246, 0.05);
+}
+
+.photo-item img {
+  max-width: 100%;
+  height: 120px;
+  object-fit: cover;
+  border-radius: 8px;
+  margin-bottom: 8px;
+}
+
+.photo-item .remove-photo {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  background: var(--danger);
+  color: white;
+  border: none;
+  border-radius: 50%;
+  width: 24px;
+  height: 24px;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.photo-upload {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 150px;
+}
+
+.photo-upload-icon {
+  font-size: 40px;
+  color: var(--gray);
+  margin-bottom: 10px;
+}
+
+.photo-count {
+  font-size: 12px;
+  color: var(--gray);
+  margin-top: 5px;
+}
+
+.email-section {
+  background: linear-gradient(135deg, #DBEAFE, #BFDBFE);
+  border-left: 4px solid var(--primary);
+  padding: 20px;
+  border-radius: 12px;
+  margin: 20px 0;
+}
+
+.email-status {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.email-sent {
+  background: #D1FAE5;
+  color: #065F46;
+}
+
+.email-not-sent {
+  background: #FEE2E2;
+  color: #7F1D1D;
+}
+
+.bottom-bar { 
+  position: fixed; 
+  bottom: 0; 
+  left: 0; 
+  right: 0; 
+  background: linear-gradient(to top, white, rgba(255,255,255,0.98));
+  border-top: 1px solid var(--border); 
+  padding: 14px 20px; 
+  text-align: center; 
+  box-shadow: 0 -10px 40px rgba(0,0,0,0.1); 
+  z-index: 1000;
+  backdrop-filter: blur(10px);
+}
+
+.btn { 
+  padding: 12px 18px; 
+  margin: 0 6px; 
+  border: none; 
+  border-radius: 10px; 
+  cursor: pointer; 
+  font-size: 14px; 
+  font-weight: 600; 
+  box-shadow: var(--shadow);
+  transition: all 0.3s ease;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.btn-save { background: linear-gradient(135deg, var(--secondary), #059669); color: white; }
+.btn-save:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(16, 185, 129, 0.4); }
+
+.btn-pdf { background: linear-gradient(135deg, var(--danger), #DC2626); color: white; }
+.btn-pdf:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(239, 68, 68, 0.4); }
+
+.btn-email { background: linear-gradient(135deg, var(--info), #0891B2); color: white; }
+.btn-email:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(6, 182, 212, 0.4); }
+
+.btn-load { background: linear-gradient(135deg, var(--primary), var(--primary-dark)); color: white; flex: 1; padding: 10px 16px; }
+.btn-delete { background: linear-gradient(135deg, var(--danger), #B91C1C); color: white; flex: 1; padding: 10px 16px; }
+
+.saved-card { 
+  background: white; 
+  border: 1px solid var(--border); 
+  border-radius: 16px; 
+  padding: 20px; 
+  margin-bottom: 16px; 
+  box-shadow: var(--shadow);
+  border-left: 4px solid var(--primary);
+}
+
+.saved-card h4 { margin: 0 0 12px 0; color: var(--dark); font-size: 18px; font-weight: 600; }
+.saved-card p { margin: 6px 0; font-size: 14px; color: var(--gray); }
+.saved-actions { margin-top: 16px; display: flex; gap: 12px; }
+
+.alert {
+  padding: 16px;
+  border-radius: 12px;
+  margin-bottom: 20px;
+}
+
+.alert-info {
+  background: linear-gradient(135deg, #DBEAFE, #BFDBFE);
+  border-left: 4px solid var(--primary);
+  color: #1E40AF;
+}
+
+.alert-success {
+  background: linear-gradient(135deg, #D1FAE5, #A7F3D0);
+  border-left: 4px solid var(--secondary);
+  color: #065F46;
+}
+
+.alert-danger {
+  background: linear-gradient(135deg, #FEE2E2, #FECACA);
+  border-left: 4px solid var(--danger);
+  color: #7F1D1D;
+}
+
+.row { display: block; }
+.col { width: 100%; margin-bottom: 16px; }
+
+@media (min-width: 768px) { 
+  .row { display: flex; gap: 20px; } 
+  .col { flex: 1; margin-bottom: 0; }
+}
+
+.counter-badge {
+  background: var(--danger);
+  color: white;
+  border-radius: 50%;
+  padding: 2px 8px;
+  font-size: 12px;
+  margin-left: 4px;
+}
+
+.urgence-badge {
+  display: inline-block;
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.urgence-faible { background: #D1FAE5; color: #065F46; }
+.urgence-moyenne { background: #FED7AA; color: #92400E; }
+.urgence-elevee { background: #FBBF24; color: #78350F; }
+.urgence-critique { background: #FCA5A5; color: #7F1D1D; }
+
+textarea.form-control {
+  resize: vertical;
+  min-height: 80px;
 }
 
 .table-wrap { 
@@ -310,7 +541,6 @@ select.form-control {
   color: var(--dark);
   text-transform: uppercase;
   font-size: 12px;
-  letter-spacing: 0.5px;
 }
 
 .table tr:hover { background: rgba(59, 130, 246, 0.05); }
@@ -322,133 +552,16 @@ select.form-control {
   border-radius: 6px; 
   font-size: 13px;
   text-align: center;
-  transition: all 0.2s ease;
 }
 
-.table input:focus {
-  border-color: var(--primary);
-  outline: none;
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+.chaudiere-1 {
+  border-left: 4px solid var(--info);
+  background: linear-gradient(to right, rgba(6, 182, 212, 0.05), white);
 }
 
-.bottom-bar { 
-  position: fixed; 
-  bottom: 0; 
-  left: 0; 
-  right: 0; 
-  background: linear-gradient(to top, white, rgba(255,255,255,0.98));
-  border-top: 1px solid var(--border); 
-  padding: 14px 20px; 
-  text-align: center; 
-  box-shadow: 0 -10px 40px rgba(0,0,0,0.1); 
-  z-index: 1000;
-  backdrop-filter: blur(10px);
-}
-
-.btn { 
-  padding: 12px 18px; 
-  margin: 0 6px; 
-  border: none; 
-  border-radius: 10px; 
-  cursor: pointer; 
-  font-size: 14px; 
-  font-weight: 600; 
-  min-width: auto; 
-  box-shadow: var(--shadow);
-  transition: all 0.3s ease;
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
-}
-
-.btn-save { background: linear-gradient(135deg, var(--secondary), #059669); color: white; }
-.btn-save:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(16, 185, 129, 0.4); }
-
-.btn-pdf { background: linear-gradient(135deg, var(--danger), #DC2626); color: white; }
-.btn-pdf:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(239, 68, 68, 0.4); }
-
-.btn-load { background: linear-gradient(135deg, var(--primary), var(--primary-dark)); color: white; flex: 1; padding: 10px 16px; }
-.btn-load:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4); }
-
-.btn-delete { background: linear-gradient(135deg, var(--danger), #B91C1C); color: white; flex: 1; padding: 10px 16px; }
-.btn-delete:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(239, 68, 68, 0.4); }
-
-.saved-card { 
-  background: white; 
-  border: 1px solid var(--border); 
-  border-radius: 16px; 
-  padding: 20px; 
-  margin-bottom: 16px; 
-  box-shadow: var(--shadow);
-  border-left: 4px solid var(--primary);
-}
-
-.saved-card h4 { margin: 0 0 12px 0; color: var(--dark); font-size: 18px; font-weight: 600; }
-.saved-card p { margin: 6px 0; font-size: 14px; color: var(--gray); }
-
-.saved-actions { margin-top: 16px; display: flex; gap: 12px; }
-
-.alert {
-  padding: 16px;
-  border-radius: 12px;
-  margin-bottom: 20px;
-}
-
-.alert-info {
-  background: linear-gradient(135deg, #DBEAFE, #BFDBFE);
-  border-left: 4px solid var(--primary);
-  color: #1E40AF;
-}
-
-.alert-success {
-  background: linear-gradient(135deg, #D1FAE5, #A7F3D0);
-  border-left: 4px solid var(--secondary);
-  color: #065F46;
-}
-
-.alert-danger {
-  background: linear-gradient(135deg, #FEE2E2, #FECACA);
-  border-left: 4px solid var(--danger);
-  color: #7F1D1D;
-}
-
-.row { display: block; }
-.col { width: 100%; margin-bottom: 16px; }
-
-@media (min-width: 768px) { 
-  .row { display: flex; gap: 20px; } 
-  .col { flex: 1; margin-bottom: 0; }
-  .header h1 { font-size: 28px; }
-  .content { padding: 40px 30px 120px; }
-}
-
-.counter-badge {
-  background: var(--danger);
-  color: white;
-  border-radius: 50%;
-  padding: 2px 8px;
-  font-size: 12px;
-  margin-left: 4px;
-  display: inline-block;
-}
-
-.urgence-badge {
-  display: inline-block;
-  padding: 6px 12px;
-  border-radius: 20px;
-  font-size: 12px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.urgence-faible { background: #D1FAE5; color: #065F46; }
-.urgence-moyenne { background: #FED7AA; color: #92400E; }
-.urgence-elevee { background: #FBBF24; color: #78350F; }
-.urgence-critique { background: #FCA5A5; color: #7F1D1D; }
-
-textarea.form-control {
-  resize: vertical;
-  min-height: 80px;
+.chaudiere-2 {
+  border-left: 4px solid var(--warning);
+  background: linear-gradient(to right, rgba(245, 158, 11, 0.05), white);
 }
 </style>
 </head>
@@ -464,7 +577,8 @@ textarea.form-control {
     <button class="nav-btn" onclick="showTab(1)">📊 Mesures</button>
     <button class="nav-btn" onclick="showTab(2)">🔧 Contrôles</button>
     <button class="nav-btn" onclick="showTab(3)">📝 Observations</button>
-    <button class="nav-btn" onclick="showTab(4)">💾 Sauvés <span class="counter-badge"><?= count($reports) ?></span></button>
+    <button class="nav-btn" onclick="showTab(4)">📸 Photos</button>
+    <button class="nav-btn" onclick="showTab(5)">💾 Sauvés <span class="counter-badge"><?= count($reports) ?></span></button>
   </div>
 
   <div class="content">
@@ -479,6 +593,7 @@ textarea.form-control {
       <input type="hidden" name="mesures" id="mesuresData">
       <input type="hidden" name="controles" id="controlesData">
       <input type="hidden" name="releves" id="relevesData">
+      <input type="hidden" name="photos" id="photosData">
 
       <div class="tab active" id="tab-0">
         <div class="alert alert-info">
@@ -500,6 +615,15 @@ textarea.form-control {
                 <input type="date" class="form-control" name="reportDate" id="reportDate" value="<?= date('Y-m-d') ?>">
               </div>
             </div>
+          </div>
+        </div>
+
+        <div class="email-section">
+          <h3 style="border: none; padding: 0; margin-bottom: 15px;">📧 Envoi par Email</h3>
+          <div class="form-group">
+            <label>Email du destinataire</label>
+            <input type="email" class="form-control" name="email_destinataire" id="email_destinataire" placeholder="exemple@domaine.fr">
+            <small style="color: #6B7280; margin-top: 5px; display: block;">Le rapport sera envoyé automatiquement à cette adresse après sauvegarde</small>
           </div>
         </div>
 
@@ -651,6 +775,26 @@ textarea.form-control {
       </div>
 
       <div class="tab" id="tab-4">
+        <h3 style="color: var(--dark); margin-bottom: 20px;">📸 Photos (Max 3)</h3>
+        <div class="card">
+          <div class="alert alert-info">
+            <span>💡 Ajoutez jusqu'à 3 photos pour documenter votre intervention. Les photos seront incluses dans le PDF et l'email.</span>
+          </div>
+          
+          <div class="photos-container" id="photosContainer">
+            <!-- Les photos seront ajoutées dynamiquement ici -->
+            <div class="photo-item photo-upload" onclick="document.getElementById('photoInput').click()">
+              <div class="photo-upload-icon">📷</div>
+              <div style="font-size: 14px; color: var(--gray);">Ajouter une photo</div>
+              <div class="photo-count" id="photoCount">0/3 photos</div>
+            </div>
+          </div>
+          
+          <input type="file" id="photoInput" accept="image/*" style="display: none;" onchange="handlePhotoUpload(event)">
+        </div>
+      </div>
+
+      <div class="tab" id="tab-5">
         <h3 style="color: var(--dark); margin-bottom: 20px;">📂 Rapports Sauvegardés (<?= $totalReports ?>)</h3>
         <div id="saved-list">
           <?php if (empty($reports)): ?>
@@ -663,6 +807,18 @@ textarea.form-control {
               <h4>📄 Rapport <?= htmlspecialchars($report['report_num'] ?: 'Sans numéro') ?></h4>
               <p>Date: <?= htmlspecialchars($report['report_date'] ?: 'Non spécifiée') ?></p>
               <p>Intervenant: <?= htmlspecialchars($report['intervenant'] ?: 'Non spécifié') ?></p>
+              <?php if ($report['photo_count'] > 0): ?>
+              <p>📸 Photos: <?= $report['photo_count'] ?></p>
+              <?php endif; ?>
+              <?php if ($report['email_destinataire']): ?>
+              <p>📧 Email: <?= htmlspecialchars($report['email_destinataire']) ?>
+                <?php if ($report['email_sent']): ?>
+                  <span class="email-status email-sent">✓ Envoyé</span>
+                <?php else: ?>
+                  <span class="email-status email-not-sent">✗ Non envoyé</span>
+                <?php endif; ?>
+              </p>
+              <?php endif; ?>
               <?php if ($report['urgence']): ?>
               <p>Urgence: <span class="urgence-badge urgence-<?= $report['urgence'] ?>">
                 <?php 
@@ -673,6 +829,9 @@ textarea.form-control {
               <?php endif; ?>
               <div class="saved-actions">
                 <button type="button" class="btn-load" onclick="loadReport(<?= $report['id'] ?>)">Charger</button>
+                <?php if ($report['email_destinataire'] && !$report['email_sent']): ?>
+                <button type="button" class="btn-email" onclick="sendEmail(<?= $report['id'] ?>)">📧 Envoyer</button>
+                <?php endif; ?>
                 <form method="POST" style="flex: 1; margin: 0;" onsubmit="return confirm('⚠️ Êtes-vous sûr de vouloir supprimer ce rapport ?')">
                   <input type="hidden" name="action" value="delete">
                   <input type="hidden" name="id" value="<?= $report['id'] ?>">
@@ -699,6 +858,10 @@ const controles = <?= json_encode($controles) ?>;
 const releves = <?= json_encode($releves) ?>;
 const savedReports = <?= json_encode($reports) ?>;
 
+// Gestion des photos
+let photos = [];
+const MAX_PHOTOS = 3;
+
 function showTab(index) {
   const tabs = document.querySelectorAll('.tab');
   const btns = document.querySelectorAll('.nav-btn');
@@ -706,6 +869,88 @@ function showTab(index) {
     tab.classList.toggle('active', i === index);
     btns[i].classList.toggle('active', i === index);
   });
+}
+
+function handlePhotoUpload(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  
+  if (photos.length >= MAX_PHOTOS) {
+    alert(`Maximum ${MAX_PHOTOS} photos autorisées`);
+    return;
+  }
+  
+  // Vérifier la taille (max 5MB)
+  if (file.size > 5 * 1024 * 1024) {
+    alert('La photo est trop grande (max 5MB)');
+    return;
+  }
+  
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    const photo = {
+      data: e.target.result,
+      name: file.name,
+      type: file.type,
+      size: file.size,
+      description: ''
+    };
+    
+    photos.push(photo);
+    renderPhotos();
+  };
+  reader.readAsDataURL(file);
+  
+  // Reset input
+  event.target.value = '';
+}
+
+function renderPhotos() {
+  const container = document.getElementById('photosContainer');
+  container.innerHTML = '';
+  
+  // Afficher les photos existantes
+  photos.forEach((photo, index) => {
+    const div = document.createElement('div');
+    div.className = 'photo-item';
+    div.innerHTML = `
+      <button class="remove-photo" onclick="removePhoto(${index})" type="button">×</button>
+      <img src="${photo.data}" alt="Photo ${index + 1}">
+      <input type="text" class="form-control" placeholder="Description..." 
+             value="${photo.description}" 
+             onchange="updatePhotoDescription(${index}, this.value)"
+             style="margin-top: 5px; padding: 6px; font-size: 12px;">
+    `;
+    container.appendChild(div);
+  });
+  
+  // Ajouter le bouton d'upload si moins de 3 photos
+  if (photos.length < MAX_PHOTOS) {
+    const uploadDiv = document.createElement('div');
+    uploadDiv.className = 'photo-item photo-upload';
+    uploadDiv.onclick = () => document.getElementById('photoInput').click();
+    uploadDiv.innerHTML = `
+      <div class="photo-upload-icon">📷</div>
+      <div style="font-size: 14px; color: var(--gray);">Ajouter une photo</div>
+      <div class="photo-count">${photos.length}/${MAX_PHOTOS} photos</div>
+    `;
+    container.appendChild(uploadDiv);
+  }
+  
+  // Mettre à jour le compteur
+  const counter = document.getElementById('photoCount');
+  if (counter) counter.textContent = `${photos.length}/${MAX_PHOTOS} photos`;
+}
+
+function removePhoto(index) {
+  if (confirm('Supprimer cette photo ?')) {
+    photos.splice(index, 1);
+    renderPhotos();
+  }
+}
+
+function updatePhotoDescription(index, description) {
+  photos[index].description = description;
 }
 
 function collectMesures() {
@@ -738,10 +983,18 @@ function collectReleves() {
 }
 
 function saveReport() {
+  // Vérifier l'email si fourni
+  const email = document.getElementById('email_destinataire').value;
+  if (email && !validateEmail(email)) {
+    alert('Adresse email invalide');
+    return;
+  }
+  
   document.getElementById('formAction').value = 'save';
   document.getElementById('mesuresData').value = JSON.stringify(collectMesures());
   document.getElementById('controlesData').value = JSON.stringify(collectControles());
   document.getElementById('relevesData').value = JSON.stringify(collectReleves());
+  document.getElementById('photosData').value = JSON.stringify(photos);
   document.getElementById('mainForm').submit();
 }
 
@@ -750,7 +1003,21 @@ function generatePDF() {
   document.getElementById('mesuresData').value = JSON.stringify(collectMesures());
   document.getElementById('controlesData').value = JSON.stringify(collectControles());
   document.getElementById('relevesData').value = JSON.stringify(collectReleves());
+  document.getElementById('photosData').value = JSON.stringify(photos);
   document.getElementById('mainForm').submit();
+}
+
+function sendEmail(reportId) {
+  if (confirm('Envoyer ce rapport par email ?')) {
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.innerHTML = `
+      <input type="hidden" name="action" value="send_email">
+      <input type="hidden" name="report_id" value="${reportId}">
+    `;
+    document.body.appendChild(form);
+    form.submit();
+  }
 }
 
 function loadReport(id) {
@@ -760,6 +1027,7 @@ function loadReport(id) {
   document.getElementById('reportNum').value = report.report_num || '';
   document.getElementById('reportDate').value = report.report_date || '';
   document.getElementById('address').value = report.address || '';
+  document.getElementById('email_destinataire').value = report.email_destinataire || '';
   document.getElementById('c1_marque').value = report.c1_marque || '';
   document.getElementById('c1_modele').value = report.c1_modele || '';
   document.getElementById('c1_serie').value = report.c1_serie || '';
@@ -792,9 +1060,28 @@ function loadReport(id) {
     document.querySelector(`[data-releve="${i}"]`).value = report.releves[releve] || '';
   });
   
+  // Charger les photos
+  if (report.photos && report.photos.length > 0) {
+    photos = report.photos.map(p => ({
+      data: p.photo_data,
+      name: p.photo_name,
+      type: p.photo_type,
+      size: p.photo_size,
+      description: p.description || ''
+    }));
+    renderPhotos();
+  }
+  
   showTab(0);
   alert('🔥 Rapport chargé avec succès !');
 }
+
+function validateEmail(email) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+// Initialiser l'affichage des photos
+renderPhotos();
 </script>
 </body>
 </html>
